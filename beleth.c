@@ -54,12 +54,47 @@ void print_help(char *cmd) {
 	fprintf(stderr,"\t-h\t\tDisplay this help\n");
 	fprintf(stderr,"\t-l [threads]\tLimit threads to given number. Default: 10\n");
 	fprintf(stderr,"\t-p [port]\tSpecify remote port\n");
+	fprintf(stderr,"\t-P [password]\tUse single password attempt\n");
 	fprintf(stderr,"\t-t [target]\tAttempt connections to this server\n");
 	fprintf(stderr,"\t-u [user]\tAttempt connection using this username\n");
 	fprintf(stderr,"\t-v\t\t-v (Show attempts) -vv (Show debugging)\n");
 	fprintf(stderr,"\t-w [wordlist]\tUse this wordlist. Defaults to wordlist.txt\n");
 }
 
+/* Display banner */
+void print_banner()
+{
+	int i;
+	int with = 40;
+	struct printTextFormat utf8format = {
+		"\342\224\214", /* ┌ */
+		"\342\224\220", /*  ┐*/
+		"\342\224\224", /*└  */
+		"\342\224\230", /* ┘ */
+		"\342\224\200", /* ─ */
+		"\342\224\202"  /* │ */
+	};
+
+	printf("\e[32m\e[40m");
+	printf("%s", utf8format.tlc);
+	for (i = 0; i < with; ++i)
+		printf("%s", utf8format.hrb);
+	printf("%s\n", utf8format.trc);
+
+	printf("%s", utf8format.vrb);
+	printf("                 Beleth                 ");
+	printf("%s\n", utf8format.vrb);
+
+	printf("%s", utf8format.vrb);
+	printf("          www.chokepoint.net            ");
+	printf("%s\n", utf8format.vrb);
+
+	printf("%s", utf8format.blc);
+	for (i = 0; i < with; ++i)
+		printf("%s", utf8format.hrb);
+	printf("%s", utf8format.brc);
+	printf("\e[0m\n");
+}
 /*
  * crack_thread
  * Called as the child process of fork.
@@ -72,7 +107,7 @@ void crack_thread(struct t_ctx *c_thread) {
 		fprintf(stderr, "[*] (%d) Connecting to: %s:%d\n",getpid(),c_thread->host,c_thread->port);
 
 
-    while ((c_thread->sock = session_init(c_thread->host,c_thread->port,c_thread->session)) == -1) {
+	while ((c_thread->sock = session_init(c_thread->host,c_thread->port,c_thread->session)) == -1) {
 		if (verbose >= VERBOSE_DEBUG)
 			fprintf(stderr,"[!] Unable to connect to %s:%d\n",c_thread->host,c_thread->port);
 		session_cleanup(c_thread->sock, c_thread->session);
@@ -102,7 +137,7 @@ void crack_thread(struct t_ctx *c_thread) {
 			if (rc != LIBSSH2_ERROR_AUTHENTICATION_FAILED) {
 					session_cleanup(c_thread->sock, c_thread->session);
 					c_thread->session = libssh2_session_init();
-	
+
 					while ( (c_thread->sock = session_init(c_thread->host,c_thread->port, c_thread->session)) == -1) {
 						if (verbose >= VERBOSE_DEBUG)
 							fprintf(stderr, "[!] Unable to reconnect to %s:%d\n",c_thread->host,c_thread->port);
@@ -122,7 +157,6 @@ void crack_thread(struct t_ctx *c_thread) {
 			buf[1] = '\0';
 			write(c_thread->fd,buf,strlen(buf));
 			return;
-			break;
 		}
 	}
 }
@@ -181,11 +215,11 @@ int connect_sock(void) {
 		return -1;
 	}
 
-    memset(&addr,0x00,sizeof(addr));
-    addr.sun_family = AF_UNIX;
-    strncpy(addr.sun_path, sock_file, sizeof(addr.sun_path)-1);
+	memset(&addr,0x00,sizeof(addr));
+	addr.sun_family = AF_UNIX;
+	strncpy(addr.sun_path, sock_file, sizeof(addr.sun_path)-1);
 
-    if (connect(fd, (struct sockaddr*)&addr, sizeof(addr)) == -1) {
+	if (connect(fd, (struct sockaddr*)&addr, sizeof(addr)) == -1) {
 		if (verbose >= VERBOSE_DEBUG)
 			fprintf(stderr, "[!] Error connecting to UNIX socket\n");
 		return -1;
@@ -241,7 +275,7 @@ void init_pw_tasker(int unix_fd, int threads) {
 									if (auth == 0)
 										printf("[!] No password matches found.\n");
 									exit(0);
-								}					
+								}
 							} else {
 								write(rc, current_pw->pw, strlen(current_pw->pw));
 								current_pw = current_pw->next;
@@ -262,10 +296,11 @@ void init_pw_tasker(int unix_fd, int threads) {
 }
 
 int main(int argc, char *argv[]) {
-    int rc, remote_port = 22, c_opt;
-    int threads = 10, unix_fd, i;
-
-    char host[21] = "127.0.0.1", str_wordlist[256] = "wordlist.txt";
+	int rc, remote_port = 22, c_opt;
+	int threads = 10, unix_fd, i;
+	int single_pw = 0;
+	
+	char host[21] = "127.0.0.1", str_wordlist[256] = "wordlist.txt";
 	pid_t pid, task_pid;
 
 	verbose = 0;
@@ -276,8 +311,8 @@ int main(int argc, char *argv[]) {
 		return 1;
 	}
 
-    if (argc > 1) {
-		while ((c_opt = getopt(argc, argv, "hvp:t:u:w:c:l:")) != -1) {
+	if (argc > 1) {
+		while ((c_opt = getopt(argc, argv, "hvp:t:u:w:c:l:P:")) != -1) {
 			switch(c_opt) {
 					case 'h':
 						print_help(argv[0]);
@@ -312,24 +347,31 @@ int main(int argc, char *argv[]) {
 							exit(1);
 						}
 						break;
+					case 'P':
+						threads = single_pw = 1;
+						add_pw_list(optarg);
+						break;
 					default:
 						fprintf(stderr, "[!] Invalid option %c\n",c_opt);
 						exit(1);
 			}
 		}
-    } else {
+	} else {
 		print_help(argv[0]);
 		exit(1);
 	}
 
 	/* Print banner */
-	printf("\e[32m\e[40m+-----------------------------------------+\e[0m\n\e[40m\e[32m|                 Beleth                  |\e[0m\n");
-	printf("\e[40m\e[32m|           www.chokepoint.net            |\e[0m\n\e[40m\e[32m+-----------------------------------------+\e[0m\n");
+	print_banner();
 
 	/* Initiate the linked list using the given wordlist */
-    if (read_wordlist(str_wordlist) == -1)
-		return 1;
-
+	if (!single_pw) {
+		if (read_wordlist(str_wordlist) == -1)
+			return 1;
+	} else {
+		printf("[*] Loaded one password\n");
+	}
+	
 	printf("[*] Starting task manager\n");
 	/* Listen to UNIX socket for IPC */
 	if ((unix_fd = listen_sock(threads)) == -1) {
@@ -360,7 +402,7 @@ int main(int argc, char *argv[]) {
 			fprintf(stderr, "[!] Couldn't fork!\n");
 			destroy_pw_list();
 			exit(1);
-		} else if (pid == 0)  { 				/* child thread */
+		} else if (pid == 0)  {					/* child thread */
 			crack_thread(t_current);
 
 			if (ptr != NULL)
@@ -377,5 +419,5 @@ int main(int argc, char *argv[]) {
 	/* proper cleanup */
 	destroy_pw_list();
 	libssh2_exit();
-    return 0;
+	return 0;
 }
